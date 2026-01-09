@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  UserPlus, CheckCircle2, Search, Printer, Loader2, 
+  Download, ChevronRight, ShieldCheck, Wifi,
+  List, FileText, X, Eraser, Filter, FileSpreadsheet
+} from 'lucide-react';
+
+const App = () => {
+  const [activeTab, setActiveTab] = useState('pendaftaran');
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [customerData, setCustomerData] = useState([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showSummaryModal, setShowSummaryModal] = useState(false);
+  const [showThermalModal, setShowThermalModal] = useState(false);
+  const [lastRegistered, setLastRegistered] = useState(null);
+  
+  const [showFilter, setShowFilter] = useState(false);
+  const [filters, setFilters] = useState({
+    search: '', rt: '', rw: '', desa: '', kecamatan: '', layanan: '', paket: ''
+  });
+
+  const [signatureData, setSignatureData] = useState(null);
+  const canvasRef = useRef(null);
+  const isDrawing = useRef(false);
+
+  const [formData, setFormData] = useState({
+    nama: '', jalan: '', rt: '', rw: '', desa: '', kecamatan: '', kota: '',
+    whatsapp: '', jenisLayanan: '', paket: ''
+  });
+
+  const daftarPaket = [
+    "Paket Bronze 25 Mbps (Rp 135.000)",
+    "Paket Silver 35 Mbps (Rp 165.000)",
+    "Paket Gold 75 Mbps (Rp 225.000)",
+    "Paket Platinum 100 Mbps (Rp 300.000)",
+    "Paket promo 50 Mbps (Rp 165.000)"
+  ];
+
+  const syratKetentuan = [
+    "Pelanggan berkewajiban membayar tagihan sebelum tanggal yang ditetapkan pada saat pemasangan setiap bulannya.",
+    "Perangkat (ONT/Modem) adalah milik VAPNET and dipinjamkan selama masa berlangganan.",
+    "Dilarang keras menyebarluaskan dengan cara paralel atau menjual kembali (Reseller) layanan.",
+    "VAPNET tidak bertanggung jawab atas penurunan kecepatan akibat perangkat pihak ke-3.",
+    "Pengakhiran layanan wajib dilaporkan minimal 7 hari sebelum periode tagihan baru.",
+    "Alat yang dipakai pelanggan akan dicabut kembali oleh pihak Vapnet tanpa biaya tarik alat/modem."
+  ];
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const scripts = [
+      'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
+    ];
+    scripts.forEach(src => {
+      if (!document.querySelector(`script[src="${src}"]`)) {
+        const script = document.createElement('script');
+        script.src = src;
+        script.async = true;
+        document.body.appendChild(script);
+      }
+    });
+  }, []);
+
+  const startDrawing = (e) => {
+    isDrawing.current = true;
+    draw(e);
+  };
+
+  const endDrawing = () => {
+    isDrawing.current = false;
+    const canvas = canvasRef.current;
+    if (canvas) setSignatureData(canvas.toDataURL());
+  };
+
+  const draw = (e) => {
+    if (!isDrawing.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+    const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#0f172a';
+
+    if (e.type === 'mousedown' || e.type === 'touchstart') {
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    }
+  };
+
+  const clearSignature = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setSignatureData(null);
+  };
+
+  const exportToExcel = () => {
+    if (filteredData.length === 0) return;
+    const worksheet = window.XLSX.utils.json_to_sheet(filteredData.map(item => ({
+      ID: item.id,
+      Tanggal: item.tanggal,
+      Nama: item.nama,
+      Alamat: item.alamat,
+      WhatsApp: item.whatsapp,
+      Layanan: item.jenisLayanan,
+      Paket: item.paket,
+      Status: item.status
+    })));
+    const workbook = window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(workbook, worksheet, "Data Pelanggan");
+    window.XLSX.writeFile(workbook, `Data_Vapnet_Export_${Date.now()}.xlsx`);
+  };
+
+  const generateA4PDF = async (data) => {
+    const element = document.getElementById('a4-summary-content');
+    if (!element) return;
+    try {
+      element.style.display = 'block';
+      const canvas = await window.html2canvas(element, { scale: 2, useCORS: true });
+      const imgData = canvas.toDataURL('image/png');
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`Kontrak_Vapnet_${data.nama.replace(/\s+/g, '_')}.pdf`);
+      element.style.display = 'none';
+    } catch (err) { console.error(err); }
+  };
+
+  const generateThermalPDF = async (data) => {
+    const element = document.getElementById('thermal-receipt-content');
+    if (!element) return;
+    try {
+      element.style.display = 'block';
+      const canvas = await window.html2canvas(element, { scale: 3, useCORS: true });
+      const imgData = canvas.toDataURL('image/png');
+      const { jsPDF } = window.jspdf;
+      // Height 180 to ensure signature and details fit
+      const pdf = new jsPDF('p', 'mm', [58, 180]);
+      pdf.addImage(imgData, 'PNG', 0, 0, 58, 180);
+      pdf.save(`Struk_Vapnet_${data.id.slice(-5)}.pdf`);
+      element.style.display = 'none';
+    } catch (err) { console.error(err); }
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!signatureData) return;
+    setIsSubmitting(true);
+    
+    setTimeout(() => {
+      const timestamp = new Date();
+      const newRecord = {
+        id: "VAP-" + Date.now(),
+        tanggal: new Intl.DateTimeFormat('id-ID', { dateStyle: 'long' }).format(timestamp),
+        waktu: new Intl.DateTimeFormat('id-ID', { timeStyle: 'short' }).format(timestamp),
+        nama: formData.nama,
+        jalan: formData.jalan,
+        rt: formData.rt,
+        rw: formData.rw,
+        desa: formData.desa,
+        kecamatan: formData.kecamatan,
+        kota: formData.kota,
+        alamat: `${formData.jalan}, RT${formData.rt}/RW${formData.rw}, ${formData.desa}, ${formData.kecamatan}, ${formData.kota}`,
+        whatsapp: formData.whatsapp,
+        jenisLayanan: formData.jenisLayanan,
+        paket: formData.paket,
+        tandaTangan: signatureData,
+        status: 'Aktif'
+      };
+
+      setCustomerData(prev => [newRecord, ...prev]);
+      setLastRegistered(newRecord);
+      setShowSuccessModal(true);
+      setFormData({
+        nama: '', jalan: '', rt: '', rw: '', desa: '', kecamatan: '', kota: '',
+        whatsapp: '', jenisLayanan: '', paket: ''
+      });
+      clearSignature();
+      setIsSubmitting(false);
+    }, 800);
+  };
+
+  const filteredData = customerData.filter(item => {
+    const matchSearch = (item.nama + item.alamat + item.id).toLowerCase().includes(filters.search.toLowerCase());
+    const matchRT = filters.rt === '' || item.rt === filters.rt;
+    const matchRW = filters.rw === '' || item.rw === filters.rw;
+    const matchDesa = filters.desa === '' || item.desa.toLowerCase().includes(filters.desa.toLowerCase());
+    const matchKec = filters.kecamatan === '' || item.kecamatan.toLowerCase().includes(filters.kecamatan.toLowerCase());
+    const matchLayanan = filters.layanan === '' || item.jenisLayanan === filters.layanan;
+    const matchPaket = filters.paket === '' || item.paket === filters.paket;
+    return matchSearch && matchRT && matchRW && matchDesa && matchKec && matchLayanan && matchPaket;
+  });
+
+  return (
+    <div className="flex flex-col min-h-screen bg-slate-50 text-slate-900 font-sans pb-24">
+      <header className="sticky top-0 z-30 bg-white border-b px-5 py-4 flex items-center justify-between shadow-sm">
+        <div className="flex items-center gap-2">
+          <div className="bg-blue-600 p-1.5 rounded-lg shadow-blue-200 shadow-lg">
+            <Wifi size={18} className="text-white" />
+          </div>
+          <span className="font-black text-lg tracking-tighter italic uppercase text-slate-800">VAPNET</span>
+        </div>
+        <div className="text-right">
+          <div className="text-[10px] font-black text-blue-500 font-mono tracking-tighter">
+            {currentTime.toLocaleTimeString('id-ID')}
+          </div>
+        </div>
+      </header>
+
+      <main className="flex-1 p-4">
+        {activeTab === 'pendaftaran' && (
+          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="bg-white rounded-3xl p-6 border shadow-sm space-y-5">
+              <div className="flex items-center gap-3 border-b pb-4 border-slate-50">
+                <UserPlus className="text-blue-600" size={20} />
+                <h2 className="font-black uppercase italic tracking-tighter text-slate-700">Registrasi</h2>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-5">
+                <div className="space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Nama Lengkap</label>
+                    <input required className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent outline-none focus:border-blue-500 focus:bg-white transition-all font-semibold text-sm" value={formData.nama} onChange={(e)=>setFormData({...formData, nama: e.target.value})} placeholder="Nama Pelanggan" />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1 block text-center">Alamat Lengkap</label>
+                    <div className="space-y-2">
+                      <input required placeholder="Nama Jalan / No Rumah" className="w-full p-3 bg-slate-50 rounded-xl text-sm font-semibold border-2 border-transparent focus:border-blue-400" value={formData.jalan} onChange={(e)=>setFormData({...formData, jalan: e.target.value})} />
+                      <div className="grid grid-cols-2 gap-2">
+                        <input required placeholder="RT (Misal: 01)" className="p-3 bg-slate-50 rounded-xl text-center text-xs font-bold border-2 border-transparent focus:border-blue-400" value={formData.rt} onChange={(e)=>setFormData({...formData, rt: e.target.value})} />
+                        <input required placeholder="RW (Misal: 05)" className="p-3 bg-slate-50 rounded-xl text-center text-xs font-bold border-2 border-transparent focus:border-blue-400" value={formData.rw} onChange={(e)=>setFormData({...formData, rw: e.target.value})} />
+                      </div>
+                      <input required placeholder="Desa / Kelurahan" className="w-full p-3 bg-slate-50 rounded-xl text-sm font-semibold border-2 border-transparent focus:border-blue-400" value={formData.desa} onChange={(e)=>setFormData({...formData, desa: e.target.value})} />
+                      <input required placeholder="Kecamatan" className="w-full p-3 bg-slate-50 rounded-xl text-sm font-semibold border-2 border-transparent focus:border-blue-400" value={formData.kecamatan} onChange={(e)=>setFormData({...formData, kecamatan: e.target.value})} />
+                      <input required placeholder="Kota / Kabupaten" className="w-full p-3 bg-slate-50 rounded-xl text-sm font-semibold border-2 border-transparent focus:border-blue-400" value={formData.kota} onChange={(e)=>setFormData({...formData, kota: e.target.value})} />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">WhatsApp</label>
+                    <input required type="tel" className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent outline-none focus:border-blue-500 focus:bg-white transition-all font-semibold text-sm" value={formData.whatsapp} onChange={(e)=>setFormData({...formData, whatsapp: e.target.value})} placeholder="08xxxxxxxx" />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Layanan</label>
+                      <select required className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent outline-none focus:border-blue-500 font-bold text-sm" value={formData.jenisLayanan} onChange={(e)=>setFormData({...formData, jenisLayanan: e.target.value})}>
+                        <option value="">Pilih...</option>
+                        <option value="Pemasangan Baru">PEMASANGAN BARU</option>
+                        <option value="Relokasi">RELOKASI</option>
+                        <option value="Upgrade">UPGRADE</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Paket</label>
+                      <select required className="w-full p-4 rounded-2xl bg-slate-50 border-2 border-transparent outline-none focus:border-blue-500 font-black text-sm text-blue-600" value={formData.paket} onChange={(e)=>setFormData({...formData, paket: e.target.value})}>
+                        <option value="">Pilih Paket...</option>
+                        {daftarPaket.map(p => <option key={p} value={p}>{p.split(' (')[0]}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-5 bg-slate-900 rounded-3xl text-white space-y-4 shadow-xl">
+                  <div className="flex justify-between items-center border-b border-white/10 pb-2">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="text-blue-400" size={16} />
+                      <span className="font-bold text-[10px] uppercase tracking-wider italic">Tanda Tangan Pelanggan</span>
+                    </div>
+                    <button type="button" onClick={clearSignature} className="text-[9px] text-slate-400 flex items-center gap-1 hover:text-white">
+                      <Eraser size={12} /> HAPUS
+                    </button>
+                  </div>
+                  <div className="bg-white rounded-2xl overflow-hidden border-2 border-blue-500/30 h-40 relative touch-none">
+                    <canvas ref={canvasRef} width={400} height={200} className="w-full h-full cursor-crosshair" onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={endDrawing} onMouseOut={endDrawing} onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={endDrawing} />
+                  </div>
+                </div>
+
+                <button type="submit" disabled={!signatureData || isSubmitting} className="w-full bg-blue-600 text-white font-black py-4 rounded-2xl shadow-lg flex justify-center items-center gap-2 text-base uppercase active:scale-95 transition-all disabled:grayscale disabled:opacity-50">
+                   {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : 'Konfirmasi Pendaftaran'} <ChevronRight size={18} />
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'rekap' && (
+          <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-500">
+            <div className="bg-white p-5 rounded-3xl border shadow-sm space-y-4">
+               <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                    <input className="w-full pl-11 pr-4 py-3 bg-slate-50 rounded-2xl outline-none text-sm font-semibold" placeholder="Cari nama/alamat..." value={filters.search} onChange={(e) => setFilters({...filters, search: e.target.value})} />
+                  </div>
+                  <button onClick={() => setShowFilter(!showFilter)} className={`p-3 rounded-2xl transition-all ${showFilter ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                    <Filter size={20} />
+                  </button>
+                  <button onClick={exportToExcel} className="p-3 bg-green-100 text-green-700 rounded-2xl hover:bg-green-200">
+                    <FileSpreadsheet size={20} />
+                  </button>
+               </div>
+               {showFilter && (
+                 <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-50 animate-in slide-in-from-top-2">
+                    <input placeholder="Filter RT" className="p-3 bg-slate-50 rounded-xl text-xs font-bold" value={filters.rt} onChange={(e)=>setFilters({...filters, rt: e.target.value})} />
+                    <input placeholder="Filter RW" className="p-3 bg-slate-50 rounded-xl text-xs font-bold" value={filters.rw} onChange={(e)=>setFilters({...filters, rw: e.target.value})} />
+                    <input placeholder="Desa/Kel" className="p-3 bg-slate-50 rounded-xl text-xs font-bold" value={filters.desa} onChange={(e)=>setFilters({...filters, desa: e.target.value})} />
+                    <input placeholder="Kecamatan" className="p-3 bg-slate-50 rounded-xl text-xs font-bold" value={filters.kecamatan} onChange={(e)=>setFilters({...filters, kecamatan: e.target.value})} />
+                    <select className="p-3 bg-slate-50 rounded-xl text-[10px] font-bold" value={filters.layanan} onChange={(e)=>setFilters({...filters, layanan: e.target.value})}>
+                      <option value="">Semua Layanan</option>
+                      <option value="Pemasangan Baru">Pemasangan Baru</option>
+                      <option value="Relokasi">Relokasi</option>
+                      <option value="Upgrade">Upgrade</option>
+                    </select>
+                    <select className="p-3 bg-slate-50 rounded-xl text-[10px] font-bold" value={filters.paket} onChange={(e)=>setFilters({...filters, paket: e.target.value})}>
+                      <option value="">Semua Paket</option>
+                      {daftarPaket.map(p => <option key={p} value={p}>{p.split(' (')[0]}</option>)}
+                    </select>
+                    <button onClick={() => setFilters({search:'', rt:'', rw:'', desa:'', kecamatan:'', layanan:'', paket:''})} className="col-span-2 text-[10px] font-black text-red-500 uppercase py-2">Reset Filter</button>
+                 </div>
+               )}
+            </div>
+            <div className="flex justify-between items-center px-2">
+               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total: {filteredData.length} Pelanggan</span>
+            </div>
+            <div className="space-y-3">
+              {filteredData.length === 0 ? (
+                <div className="text-center py-20 italic text-slate-300 font-bold uppercase text-[10px]">Data Tidak Ditemukan</div>
+              ) : (
+                filteredData.map((item) => (
+                  <div key={item.id} className="bg-white p-5 rounded-[2rem] border shadow-sm flex items-center justify-between">
+                    <div className="space-y-1 flex-1">
+                      <div className="font-black text-slate-800 text-sm leading-tight uppercase">{item.nama}</div>
+                      <div className="text-[9px] text-blue-500 font-mono font-bold">{item.id.slice(-8)} • {item.paket.split(' (')[0]}</div>
+                      <div className="text-[9px] text-slate-400 italic line-clamp-1">{item.alamat}</div>
+                    </div>
+                    <div className="flex gap-2 ml-3">
+                      <button onClick={() => { setLastRegistered(item); setShowThermalModal(true); }} className="p-3 bg-slate-100 text-slate-600 rounded-xl active:bg-slate-900 active:text-white">
+                        <Printer size={16} />
+                      </button>
+                      <button onClick={() => { setLastRegistered(item); setShowSummaryModal(true); }} className="p-3 bg-blue-50 text-blue-600 rounded-xl active:bg-blue-600 active:text-white">
+                        <FileText size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </main>
+
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t px-6 py-3 flex justify-around items-center z-40 rounded-t-[2.5rem] shadow-2xl">
+        <button onClick={() => setActiveTab('pendaftaran')} className={`flex flex-col items-center gap-1 transition-all ${activeTab === 'pendaftaran' ? 'text-blue-600' : 'text-slate-400'}`}>
+          <div className={`p-2 rounded-xl ${activeTab === 'pendaftaran' ? 'bg-blue-50' : ''}`}><UserPlus size={22} /></div>
+          <span className="text-[9px] font-black uppercase tracking-widest">Daftar</span>
+        </button>
+        <button onClick={() => setActiveTab('rekap')} className={`flex flex-col items-center gap-1 transition-all ${activeTab === 'rekap' ? 'text-blue-600' : 'text-slate-400'}`}>
+          <div className={`p-2 rounded-xl ${activeTab === 'rekap' ? 'bg-blue-50' : ''}`}><List size={22} /></div>
+          <span className="text-[9px] font-black uppercase tracking-widest">Data</span>
+        </button>
+      </nav>
+
+      {/* Success Modal */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[100] flex items-end justify-center">
+          <div className="bg-white rounded-t-[3rem] p-8 w-full max-w-md animate-in slide-in-from-bottom duration-300">
+            <div className="flex flex-col items-center mb-6 text-center">
+               <div className="p-4 bg-green-100 text-green-600 rounded-full mb-3 shadow-lg"><CheckCircle2 size={32} /></div>
+               <h3 className="font-black text-xl uppercase italic">TERDAFTAR!</h3>
+               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Silakan simpan bukti pendaftaran</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => { setShowSuccessModal(false); setShowThermalModal(true); }} className="bg-slate-900 text-white py-4 rounded-2xl font-black text-[10px] uppercase flex flex-col items-center gap-2">
+                <Printer size={20} /> Struk Kasir
+              </button>
+              <button onClick={() => { setShowSuccessModal(false); setShowSummaryModal(true); }} className="bg-blue-600 text-white py-4 rounded-2xl font-black text-[10px] uppercase flex flex-col items-center gap-2">
+                <FileText size={20} /> Kontrak A4
+              </button>
+              <button onClick={() => setShowSuccessModal(false)} className="col-span-2 bg-slate-100 text-slate-400 py-3 rounded-2xl font-black text-[10px] uppercase">Tutup</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Kontrak Modal */}
+      {showSummaryModal && (
+        <div className="fixed inset-0 bg-slate-900/95 z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="p-6 border-b flex justify-between items-center bg-slate-50">
+              <h3 className="font-black text-slate-800 uppercase text-xs tracking-tighter italic">Kontrak Pelanggan</h3>
+              <button onClick={() => setShowSummaryModal(false)} className="p-2 text-slate-400"><X size={20} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 space-y-4 text-center">
+               <div className="p-5 border-2 border-blue-100 rounded-3xl bg-blue-50/30 text-left">
+                  <p className="text-[10px] font-black text-blue-500 uppercase mb-2">Informasi Pelanggan</p>
+                  <p className="text-sm font-black uppercase text-slate-800">{lastRegistered?.nama}</p>
+                  <p className="text-[10px] font-medium text-slate-500 leading-tight mt-1">{lastRegistered?.alamat}</p>
+                  <div className="mt-4 pt-4 border-t border-blue-100 grid grid-cols-2 gap-2">
+                    <div className="bg-white p-2 rounded-xl text-center">
+                      <p className="text-[8px] font-bold text-slate-400 uppercase">Paket</p>
+                      <p className="text-[9px] font-black text-blue-600">{lastRegistered?.paket.split(' (')[0]}</p>
+                    </div>
+                    <div className="bg-white p-2 rounded-xl text-center">
+                      <p className="text-[8px] font-bold text-slate-400 uppercase">Harga</p>
+                      <p className="text-[9px] font-black text-slate-800">{lastRegistered?.paket.match(/Rp\s[\d.]+/)?.[0] || 'Rp -'}</p>
+                    </div>
+                  </div>
+               </div>
+               <div className="mt-6">
+                  <p className="text-[10px] font-black text-slate-400 uppercase mb-4 italic tracking-widest">Tanda Tangan Pelanggan</p>
+                  <div className="inline-block p-4 bg-slate-50 rounded-3xl border border-dashed border-slate-300">
+                    <img src={lastRegistered?.tandaTangan} className="h-24 w-auto mix-blend-multiply mx-auto" alt="Signature" />
+                    <p className="text-[11px] font-black uppercase text-slate-800 mt-2 border-t pt-2">( {lastRegistered?.nama} )</p>
+                  </div>
+               </div>
+            </div>
+            <div className="p-6 bg-white border-t space-y-2">
+               <button onClick={() => generateA4PDF(lastRegistered)} className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-4 rounded-2xl font-black text-sm uppercase shadow-xl">
+                 <Download size={18} /> DOWNLOAD PDF KONTRAK
+               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Thermal Receipt Modal (UI Review) */}
+      {showThermalModal && (
+        <div className="fixed inset-0 bg-slate-900/95 z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-xs overflow-hidden">
+            <div className="p-5 border-b flex justify-between items-center">
+              <h3 className="font-black text-slate-800 uppercase text-xs italic">Pratinjau Struk</h3>
+              <button onClick={() => setShowThermalModal(false)} className="p-2 text-slate-400"><X size={20} /></button>
+            </div>
+            <div className="p-5 bg-slate-100 flex justify-center max-h-[65vh] overflow-y-auto">
+               <div className="w-[58mm] bg-white shadow-lg p-5 font-mono text-[10px] text-black border-2 border-white">
+                  <div className="text-center mb-4">
+                    <p className="font-bold text-[14px] tracking-tight">VAPNET</p>
+                    <p className="text-[7px] uppercase tracking-tighter">High Speed Internet Solution</p>
+                    <p className="text-[8px] border-b border-black pb-2">----------------------------</p>
+                  </div>
+                  <div className="space-y-1.5 mb-4">
+                    <div className="flex justify-between"><span className="uppercase text-[8px]">Tanggal:</span><span className="text-[9px]">{lastRegistered?.tanggal}</span></div>
+                    <div className="flex justify-between"><span className="uppercase text-[8px]">ID Reg:</span><span className="text-[9px] font-bold">{lastRegistered?.id.slice(-8)}</span></div>
+                    <p className="border-b border-dashed border-black/20 my-1"></p>
+                    <div className="py-0.5"><span className="uppercase text-[7px] text-slate-600">Pelanggan:</span><p className="font-bold text-[10px] uppercase leading-tight">{lastRegistered?.nama}</p></div>
+                    <div className="py-0.5"><span className="uppercase text-[7px] text-slate-600">Alamat:</span><p className="text-[8px] leading-tight">{lastRegistered?.desa}, {lastRegistered?.kecamatan}</p></div>
+                    <div className="py-0.5"><span className="uppercase text-[7px] text-slate-600">Layanan:</span><p className="text-[9px] font-bold">{lastRegistered?.jenisLayanan}</p></div>
+                    
+                    <div className="mt-2 border-t border-b border-black py-2 bg-slate-50">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[8px] font-bold uppercase">Paket</span>
+                        <span className="text-[8px] font-bold uppercase">Harga</span>
+                      </div>
+                      <div className="flex justify-between items-start mt-1">
+                        <span className="text-[9px] font-bold flex-1 pr-1">{lastRegistered?.paket.split(' (')[0]}</span>
+                        <span className="text-[9px] font-bold whitespace-nowrap">{lastRegistered?.paket.match(/Rp\s[\d.]+/)?.[0]}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-center mt-6">
+                    <p className="text-[7px] font-bold uppercase mb-2 italic">Konfirmasi Pelanggan</p>
+                    <div className="border border-dashed border-black/30 p-2 rounded-sm inline-block">
+                      <img src={lastRegistered?.tandaTangan} className="w-28 h-12 object-contain grayscale mx-auto mix-blend-multiply" alt="Sign" />
+                    </div>
+                    <p className="text-[8px] mt-2 font-bold uppercase underline">( {lastRegistered?.nama} )</p>
+                  </div>
+                  <div className="text-center pt-5 mt-4 text-[7px] italic border-t border-dotted border-black">
+                    <p>Simpan struk ini sebagai bukti</p>
+                    <p>pendaftaran resmi VAPNET</p>
+                    <p className="mt-1 font-bold">Terima Kasih</p>
+                  </div>
+               </div>
+            </div>
+            <div className="p-5 bg-white border-t">
+               <button onClick={() => generateThermalPDF(lastRegistered)} className="w-full flex items-center justify-center gap-2 bg-slate-900 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl">
+                 <Download size={16} /> DOWNLOAD STRUK
+               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hidden PDF Templates for Exporting */}
+      <div id="a4-summary-content" style={{ display: 'none', width: '210mm', padding: '25mm', backgroundColor: 'white', color: 'black', fontFamily: 'serif' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '4px solid black', paddingBottom: '15px', marginBottom: '30px' }}>
+          <div>
+            <h1 style={{ fontSize: '32px', margin: 0, fontWeight: '900', fontStyle: 'italic', color: '#1d4ed8' }}>VAPNET</h1>
+            <p style={{ margin: 0, fontSize: '12px', fontWeight: 'bold', letterSpacing: '2px' }}>INTERNET SERVICE PROVIDER</p>
+          </div>
+          <div style={{ textAlign: 'right', fontSize: '11px', lineHeight: '1.5' }}>
+            <p style={{ margin: 0 }}><strong>NOMOR REGISTRASI:</strong> {lastRegistered?.id}</p>
+            <p style={{ margin: 0 }}><strong>TANGGAL DAFTAR:</strong> {lastRegistered?.tanggal}</p>
+          </div>
+        </div>
+        
+        <div style={{ marginBottom: '35px' }}>
+          <h2 style={{ fontSize: '16px', backgroundColor: '#f1f5f9', padding: '8px 12px', borderRadius: '4px', textTransform: 'uppercase' }}>DETAIL PELANGGAN & LAYANAN</h2>
+          <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse', marginTop: '10px' }}>
+            <tbody>
+              <tr><td style={{ width: '180px', padding: '8px', borderBottom: '1px solid #e2e8f0' }}>Nama Lengkap</td><td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>: <strong>{lastRegistered?.nama}</strong></td></tr>
+              <tr><td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>Alamat Pemasangan</td><td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>: {lastRegistered?.alamat}</td></tr>
+              <tr><td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>Nomor WhatsApp</td><td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>: {lastRegistered?.whatsapp}</td></tr>
+              <tr><td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>Jenis Layanan</td><td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>: {lastRegistered?.jenisLayanan}</td></tr>
+              <tr><td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>Paket Berlangganan</td><td style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>: <strong>{lastRegistered?.paket}</strong></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ fontSize: '11px', textAlign: 'justify', marginBottom: '40px' }}>
+          <h2 style={{ fontSize: '16px', backgroundColor: '#f1f5f9', padding: '8px 12px', borderRadius: '4px', textTransform: 'uppercase' }}>SYARAT & KETENTUAN</h2>
+          <div style={{ padding: '10px' }}>
+            {syratKetentuan.map((t, i) => <p key={i} style={{ margin: '8px 0', lineHeight: '1.6' }}>{i+1}. {t}</p>)}
+          </div>
+        </div>
+
+        <div style={{ marginTop: '60px', textAlign: 'center' }}>
+          <div style={{ display: 'inline-block', width: '250px' }}>
+            <p style={{ fontSize: '13px', marginBottom: '10px' }}>Pelanggan Menyatakan Setuju,</p>
+            <div style={{ border: '1px dashed #cbd5e1', padding: '10px', borderRadius: '8px' }}>
+              <img src={lastRegistered?.tandaTangan} style={{ height: '70px', display: 'block', margin: '0 auto' }} alt="Sign" />
+            </div>
+            <p style={{ marginTop: '15px', fontWeight: 'bold', fontSize: '14px', textTransform: 'uppercase', textDecoration: 'underline' }}>{lastRegistered?.nama}</p>
+            <p style={{ fontSize: '10px', color: '#64748b' }}>Tanda Tangan Digital Sah</p>
+          </div>
+        </div>
+        
+        <div style={{ marginTop: 'auto', paddingTop: '40px', textAlign: 'center', fontSize: '10px', color: '#94a3b8', borderTop: '1px solid #e2e8f0' }}>
+          <p>Dokumen ini diterbitkan secara elektronik melalui VAPNET Mobile Dashboard.</p>
+        </div>
+      </div>
+
+      {/* Hidden Thermal Export Content */}
+      <div id="thermal-receipt-content" style={{ display: 'none', width: '58mm', padding: '6mm', backgroundColor: 'white', color: 'black', fontFamily: 'monospace' }}>
+        <div style={{ textAlign: 'center' }}>
+          <p style={{ fontSize: '15px', fontWeight: 'bold', margin: '0 0 2px 0' }}>VAPNET</p>
+          <p style={{ fontSize: '8px', margin: 0 }}>Internet Solution Sukabumi</p>
+          <p style={{ fontSize: '8px' }}>----------------------------</p>
+        </div>
+        <div style={{ fontSize: '8px', margin: '12px 0' }}>
+          <p>TGL : {lastRegistered?.tanggal}</p>
+          <p>ID  : {lastRegistered?.id.slice(-10)}</p>
+          <p>----------------------------</p>
+          <p style={{ fontWeight: 'bold' }}>NAMA: {lastRegistered?.nama}</p>
+          <p>DESA: {lastRegistered?.desa}</p>
+          <p>KEC : {lastRegistered?.kecamatan}</p>
+          <p>LYN : {lastRegistered?.jenisLayanan}</p>
+          <p>----------------------------</p>
+          <p style={{ fontWeight: 'bold' }}>PAKET: {lastRegistered?.paket.split(' (')[0]}</p>
+          <p style={{ fontWeight: 'bold' }}>HARGA: {lastRegistered?.paket.match(/Rp\s[\d.]+/)?.[0]}</p>
+          <p>----------------------------</p>
+        </div>
+        <div style={{ textAlign: 'center', marginTop: '15px' }}>
+          <p style={{ fontSize: '7px', fontWeight: 'bold', textTransform: 'uppercase' }}>Tanda Tangan Pelanggan:</p>
+          <div style={{ margin: '8px 0', border: '1px dashed black' }}>
+            <img src={lastRegistered?.tandaTangan} style={{ width: '38mm', height: '18mm', filter: 'grayscale(1)', mixBlendMode: 'multiply' }} />
+          </div>
+          <p style={{ fontSize: '9px', fontWeight: 'bold' }}>({lastRegistered?.nama})</p>
+        </div>
+        <div style={{ textAlign: 'center', marginTop: '20px', borderTop: '1px dotted black', paddingTop: '8px' }}>
+          <p style={{ fontSize: '7px' }}>Terima kasih telah berlangganan</p>
+          <p style={{ fontSize: '7px' }}>VAPNET INTERNET</p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default App;
+</html>
